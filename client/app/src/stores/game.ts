@@ -46,6 +46,12 @@ type FetchPromiseEntry = {
   reject: (error?: unknown) => void
 }
 
+export interface DailySessionInfo {
+  roomUrl: string
+  token: string
+  updatedAt: string
+}
+
 interface ActiveProperty<T> {
   data: T | undefined
   last_updated: string | null
@@ -59,6 +65,7 @@ export interface GameState {
   corporation?: Corporation
   character_id?: string
   access_token?: string
+  dailySession?: DailySessionInfo
   bypassTutorial: boolean
   ship: ShipSelf
   ships: ActiveProperty<ShipSelf[]>
@@ -100,6 +107,7 @@ export interface GameSlice extends GameState {
   setCharacterId: (characterId: string) => void
   setAccessToken: (accessToken: string) => void
   setCharacterAndToken: (characterId: string, accessToken: string) => void
+  setDailySession: (dailySession: DailySessionInfo | undefined) => void
   setBypassTutorial: (bypassTutorial: boolean) => void
   addMessage: (message: ChatMessage) => void
   setChatHistory: (messages: ChatMessage[]) => void
@@ -152,6 +160,7 @@ const createGameSlice: StateCreator<GameStoreState, [], [], GameSlice> = (set, g
   corporation: undefined,
   character_id: undefined,
   access_token: undefined,
+  dailySession: undefined,
   bypassTutorial: false,
   ship: {} as ShipSelf,
   ships: { data: undefined, last_updated: null },
@@ -216,6 +225,7 @@ const createGameSlice: StateCreator<GameStoreState, [], [], GameSlice> = (set, g
   setAccessToken: (accessToken: string) => set({ access_token: accessToken }),
   setCharacterAndToken: (characterId: string, accessToken: string) =>
     set({ character_id: characterId, access_token: accessToken }),
+  setDailySession: (dailySession: DailySessionInfo | undefined) => set({ dailySession }),
   setBypassTutorial: (bypassTutorial: boolean) => set({ bypassTutorial }),
 
   setGameStateMessage: (gameStateMessage: string) => set({ gameStateMessage }),

@@ -30,6 +30,55 @@ interface GameProviderProps {
   children: ReactNode
 }
 
+type DailyConnectionParams = {
+  dailyRoom?: unknown
+  dailyToken?: unknown
+  room_url?: unknown
+  url?: unknown
+  token?: unknown
+}
+
+declare global {
+  interface Window {
+    __GRADIENT_BANG_DAILY__?: {
+      roomUrl: string
+      token: string
+    }
+  }
+}
+
+function extractDailySessionInfo(connectionParams: unknown) {
+  if (!connectionParams || typeof connectionParams !== "object") return undefined
+
+  const params = connectionParams as DailyConnectionParams
+  const roomUrl = params.dailyRoom ?? params.room_url ?? params.url
+  const token = params.dailyToken ?? params.token
+
+  if (typeof roomUrl !== "string" || !roomUrl) return undefined
+  if (typeof token !== "string" || !token) return undefined
+
+  return {
+    roomUrl,
+    token,
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+function shellQuote(value: string) {
+  return `'${value.replaceAll("'", "'\\''")}'`
+}
+
+async function copyCommanderCommandToClipboard(roomUrl: string, token: string) {
+  const command = `uv run commander.py --room-url ${shellQuote(roomUrl)} --token ${shellQuote(token)} caudio`
+
+  try {
+    await navigator.clipboard.writeText(command)
+    console.info("[GAME CONTEXT] Commander command copied to clipboard", command)
+  } catch (error) {
+    console.warn("[GAME CONTEXT] Failed to copy commander command to clipboard", error, command)
+  }
+}
+
 export function GameProvider({ children }: GameProviderProps) {
   const client = usePipecatClient()
   const playerSessionId = useGameStore((state) => state.playerSessionId)
@@ -69,11 +118,19 @@ export function GameProvider({ children }: GameProviderProps) {
     console.debug("[GAME CONTEXT] Initializing...")
 
     // Setters and store methods are stable references — pull them once.
-    const { setPlayerSessionId, setGameStateMessage, setGameState, getBotStartParams, settings } =
-      useGameStore.getState()
+    const {
+      setPlayerSessionId,
+      setGameStateMessage,
+      setGameState,
+      setDailySession,
+      getBotStartParams,
+      settings,
+    } = useGameStore.getState()
 
     // Set initial state
     setPlayerSessionId(null)
+    setDailySession(undefined)
+    delete window.__GRADIENT_BANG_DAILY__
     setGameStateMessage(GameInitStateMessage.INIT)
     setGameState("initializing")
 
@@ -109,7 +166,18 @@ export function GameProvider({ children }: GameProviderProps) {
     console.debug("[GAME CONTEXT] Connecting with params", botStartParams)
 
     try {
-      await client?.startBotAndConnect(botStartParams)
+      const connectionParams = await client?.startBot(botStartParams)
+      const dailySession = extractDailySessionInfo(connectionParams)
+      if (dailySession) {
+        setDailySession(dailySession)
+        window.__GRADIENT_BANG_DAILY__ = {
+          roomUrl: dailySession.roomUrl,
+          token: dailySession.token,
+        }
+        console.info("[GAME CONTEXT] Daily session", window.__GRADIENT_BANG_DAILY__)
+        void copyCommanderCommandToClipboard(dailySession.roomUrl, dailySession.token)
+      }
+      await client?.connect(connectionParams)
       if (!client?.connected) {
         throw new Error("Failed to connect to game server")
       }
@@ -135,6 +203,18 @@ export function GameProvider({ children }: GameProviderProps) {
       (e: Msg.ServerMessage) => {
         if ("event" in e) {
           console.debug("[GAME EVENT] Server message received", e.event, e)
+
+          if (e.event === "commander.user_text") {
+            const text = typeof e.payload?.text === "string" ? e.payload.text.trim() : ""
+            if (text) {
+              const now = new Date().toISOString()
+              useConversationStore.getState().injectMessage({
+                role: "commander",
+                parts: [{ text, final: true, createdAt: now }],
+              })
+            }
+            return
+          }
 
           // Helper functions
           const getPayloadPlayerId = (payload: Msg.ServerMessagePayload): string | undefined => {

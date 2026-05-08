@@ -586,6 +586,21 @@ class ClientMessageHandler:
             )
         await pipeline_task.queue_frames(frames)
 
+    async def _handle_commander_user_text(self, msg_type, msg_data):
+        text = msg_data.get("text", "") if isinstance(msg_data, dict) else ""
+        text = text.strip() if isinstance(text, str) else ""
+        if not text:
+            return
+        await self._rtvi.push_frame(
+            RTVIServerMessageFrame(
+                {
+                    "frame_type": "event",
+                    "event": "commander.user_text",
+                    "payload": {"text": text},
+                }
+            )
+        )
+
     async def _handle_assign_quest(self, msg_type, msg_data):
         quest_code = msg_data.get("quest_code", "") if isinstance(msg_data, dict) else ""
         if not quest_code:
@@ -1066,6 +1081,7 @@ class ClientMessageHandler:
         "say-text": _handle_say_text,
         "say-text-dismiss": _handle_say_text_dismiss,
         "user-text-input": _handle_user_text_input,
+        "commander-user-text": _handle_commander_user_text,
         "assign-quest": _handle_assign_quest,
         "claim-step-reward": _handle_claim_step_reward,
         "set-voice": _handle_set_voice,
