@@ -30,7 +30,7 @@ interface Props {
   /**
    * The role of the message
    */
-  role: "user" | "assistant" | "system" | "function_call" | "ui"
+  role: "user" | "commander" | "assistant" | "system" | "function_call" | "ui"
 }
 
 /**
@@ -58,6 +58,7 @@ export const MessageRole = ({
   const roleLabelMap = useMemo(
     () => ({
       user: clientLabel,
+      commander: "commander",
       assistant: assistantLabel,
       system: systemLabel,
       function_call: functionCallLabel,

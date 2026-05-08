@@ -25,7 +25,7 @@ interface ConversationState {
   finalizeLastMessage: (role: "user" | "assistant") => void
   removeEmptyLastMessage: (role: "user" | "assistant") => void
   injectMessage: (message: {
-    role: "user" | "assistant" | "system" | "ui"
+    role: "user" | "commander" | "assistant" | "system" | "ui"
     parts: ConversationMessagePart[]
   }) => void
   upsertUserTranscript: (text: string | React.ReactNode, final: boolean) => void

@@ -184,6 +184,7 @@ export const MessageContent = ({
           "font-semibold text-xxs uppercase",
           message.role === "assistant" ? "text-terminal"
           : message.role === "user" ? "text-fuel"
+          : message.role === "commander" ? "text-info"
           : "text-warning",
           classNames.time
         )}

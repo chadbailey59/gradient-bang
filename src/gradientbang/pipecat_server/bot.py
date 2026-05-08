@@ -115,9 +115,34 @@ DEFAULT_PERSONALITY_TONE = (
     "Wistful about the old days when the Federation meant something, but too disciplined to dwell. "
     "Addresses the player as 'commander'."
 )
+COMMANDER_DAILY_NAMES = {
+    name.strip()
+    for name in os.getenv("GB_COMMANDER_DAILY_NAMES", "GB Commander,commander").split(",")
+    if name.strip()
+}
 
 if os.getenv("BOT_USE_KRISP"):
     from pipecat.audio.filters.krisp_viva_filter import KrispVivaFilter
+
+
+def _daily_participant_name(participant: dict | None) -> str:
+    if not isinstance(participant, dict):
+        return ""
+    info = participant.get("info")
+    if isinstance(info, dict):
+        for key in ("userName", "user_name", "name"):
+            value = info.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    for key in ("userName", "user_name", "name"):
+        value = participant.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _is_commander_participant(participant: dict | None) -> bool:
+    return _daily_participant_name(participant) in COMMANDER_DAILY_NAMES
 
 
 async def _lookup_character_display_name(character_id: str, server_url: str) -> str | None:
@@ -523,7 +548,12 @@ async def run_bot(transport, runner_args: RunnerArguments, **kwargs):
 
     # ── Create subagents and wire everything together ───────────────────
 
-    from pipecat.frames.frames import BotSpeakingFrame, UserSpeakingFrame
+    from pipecat.frames.frames import (
+        BotSpeakingFrame,
+        BotStartedSpeakingFrame,
+        BotStoppedSpeakingFrame,
+        UserSpeakingFrame,
+    )
     from pipecat.pipeline.parallel_pipeline import ParallelPipeline
     from pipecat.pipeline.pipeline import Pipeline
     from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -578,6 +608,26 @@ async def run_bot(transport, runner_args: RunnerArguments, **kwargs):
                     TaskActivityFrame,
                 ),
             )
+            task.add_reached_upstream_filter((BotStartedSpeakingFrame, BotStoppedSpeakingFrame))
+
+            @task.event_handler("on_frame_reached_upstream")
+            async def _on_ship_speech_lifecycle(task, frame):
+                if isinstance(frame, BotStartedSpeakingFrame):
+                    event_name = "ship.speech_started"
+                elif isinstance(frame, BotStoppedSpeakingFrame):
+                    event_name = "ship.speech_stopped"
+                else:
+                    return
+                await rtvi.push_frame(
+                    RTVIServerMessageFrame(
+                        {
+                            "frame_type": "event",
+                            "event": event_name,
+                            "payload": {},
+                        }
+                    )
+                )
+
             for obs in task._observer._observers:
                 if isinstance(obs, RTVIObserver):
                     obs._ignored_sources = ui_branch_sources
@@ -595,6 +645,11 @@ async def run_bot(transport, runner_args: RunnerArguments, **kwargs):
 
             @transport.event_handler("on_client_connected")
             async def on_client_connected(transport, client):
+                if _is_commander_participant(client):
+                    logger.info(
+                        f"Commander participant connected: {_daily_participant_name(client)}"
+                    )
+                    return
                 logger.info("Client connected, adding agents")
                 await self.add_agent(voice_agent)
                 await self.add_agent(scripted_agent)
@@ -784,6 +839,31 @@ async def run_bot(transport, runner_args: RunnerArguments, **kwargs):
     @rtvi.event_handler("on_client_message")
     async def on_client_message(rtvi, message):
         await client_message_handler.handle(message)
+
+    @transport.event_handler("on_participant_joined")
+    async def on_participant_joined(transport, participant):
+        if not _is_commander_participant(participant):
+            return
+        participant_id = participant.get("id") if isinstance(participant, dict) else None
+        if not participant_id:
+            return
+        logger.info(
+            f"Unsubscribing from commander audio: "
+            f"{_daily_participant_name(participant)} ({participant_id})"
+        )
+        try:
+            await transport.update_subscriptions(
+                participant_settings={
+                    participant_id: {
+                        "media": {
+                            "microphone": "unsubscribed",
+                            "screenAudio": "unsubscribed",
+                        }
+                    }
+                }
+            )
+        except Exception:
+            logger.exception("Failed to unsubscribe from commander audio")
 
     @transport.event_handler("on_joined")
     async def on_joined(transport, data):

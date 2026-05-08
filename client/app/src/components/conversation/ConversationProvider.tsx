@@ -17,7 +17,7 @@ import { type ConversationMessage, type ConversationMessagePart } from "@/types/
 interface ConversationContextValue {
   messages: ConversationMessage[]
   injectMessage: (message: {
-    role: "user" | "assistant" | "system"
+    role: "user" | "commander" | "assistant" | "system" | "ui"
     parts: ConversationMessagePart[]
   }) => void
 }
