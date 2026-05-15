@@ -103,7 +103,24 @@ const App = lazy(async () => {
       }
     : async () => {
         const { DailyTransport } = await import("@pipecat-ai/daily-transport")
-        return new DailyTransport()
+        class ListenOnlyDailyTransport extends DailyTransport {
+          override enableMic(enable: boolean) {
+            if (!enable) {
+              super.enableMic(false)
+            }
+          }
+
+          override get isMicEnabled() {
+            return false
+          }
+
+          override updateMic() {}
+        }
+
+        return new ListenOnlyDailyTransport({
+          audioSource: false,
+          startAudioOff: true,
+        })
       }
 
   // Wait for SW update check and transport creation in parallel.
@@ -118,6 +135,7 @@ const App = lazy(async () => {
     if (!client) {
       const newClient = new PipecatClient({
         transport: transportInstance,
+        enableMic: transport !== "daily",
       })
       setClient(newClient)
     }

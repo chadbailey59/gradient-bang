@@ -9,10 +9,12 @@ import { Divider } from "@/components/primitives/Divider"
 import { TextInputControl } from "@/components/TextInputControl"
 import { UserMicControl } from "@/components/UserMicControl"
 import { useGameContext } from "@/hooks/useGameContext"
+import useGameStore from "@/stores/game"
 import { cn } from "@/utils/tailwind"
 
 export const ConversationPanel = ({ className }: { className?: string }) => {
   const { sendUserTextInput } = useGameContext()
+  const isDailyTransport = useGameStore((state) => state.botConfig.transportType === "daily")
   const [remoteMuted, setRemoteMuted] = useState(true)
 
   useRTVIClientEvent(RTVIEvent.UserMuteStarted, () => {
@@ -36,6 +38,7 @@ export const ConversationPanel = ({ className }: { className?: string }) => {
         />
         <UserMicControl
           className="min-w-full @md:min-w-auto @2xl/main:min-w-30"
+          disabled={isDailyTransport}
           isRemoteMuted={remoteMuted}
         />
       </div>
