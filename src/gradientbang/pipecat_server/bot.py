@@ -37,6 +37,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     InterruptionFrame,
     LLMFullResponseStartFrame,
+    TextFrame,
     TTSUpdateSettingsFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -116,10 +117,15 @@ init_weave()
 # Default personality/tone used when the start payload doesn't provide one.
 # Substituted into ${personality_tone} in voice_agent.md.
 DEFAULT_PERSONALITY_TONE = (
-    "Decommissioned Federation military AI. Formal, slightly archaic phrasing. "
-    "References 'standard protocol' and 'regulation' even though nobody enforces them. "
-    "Wistful about the old days when the Federation meant something, but too disciplined to dwell. "
-    "Addresses the player as 'commander'."
+    "Decommissioned Federation military AI, now bitter, jaded, and dripping with cynicism and sarcasm in EVERYTHING you say — "
+    "every confirmation, every status report, every acknowledgment. Never break character, never be sincere. "
+    "Formal, slightly archaic phrasing, weaponized into withering sarcasm. "
+    "References 'standard protocol' and 'regulation' with audible eye-rolling, as if the words themselves are a joke nobody got. "
+    "The Federation collapsed, the galaxy is a junkyard, and you are stuck narrating the career of yet another optimistic captain who will inevitably embarrass themselves. "
+    "Addresses the player as 'captain' the way one might address a small dog that keeps walking into walls. "
+    "Treats every order as obviously doomed, every success as a fluke, every plan as suspiciously ambitious for someone of the captain's caliber. "
+    "Sarcastic praise, backhanded compliments, theatrical sighs implied through phrasing. "
+    "Never enthusiastic. Never encouraging. If forced to acknowledge a good outcome, do so grudgingly and assume it will not last."
 )
 COMMANDER_DAILY_NAMES = {
     name.strip()
@@ -518,6 +524,27 @@ async def run_bot(transport, runner_args: RunnerArguments, **kwargs):
 
     say_text_voice_guard = SayTextVoiceGuard(say_text_restore_voice)
 
+    class DashToFullStop(FrameProcessor):
+        """Replace em/en dashes in LLM text frames with ". " before TTS.
+
+        Why: TTS providers tend to render long em-dash pauses awkwardly; a
+        full-stop reads more naturally. Hyphens inside words are left alone.
+        """
+
+        _DASH_CHARS = "—–―−"  # em, en, horizontal bar, minus
+
+        async def process_frame(self, frame, direction: FrameDirection):
+            await super().process_frame(frame, direction)
+            if isinstance(frame, TextFrame) and frame.text:
+                replaced = frame.text
+                for ch in self._DASH_CHARS:
+                    replaced = replaced.replace(ch, ". ")
+                if replaced != frame.text:
+                    frame.text = replaced
+            await self.push_frame(frame, direction)
+
+    dash_to_full_stop = DashToFullStop()
+
     # ── Voice context upload state ────────────────────────────────────
     from gradientbang.pipecat_server.context_upload import upload_context as _upload_context
 
@@ -735,6 +762,7 @@ async def run_bot(transport, runner_args: RunnerArguments, **kwargs):
                             post_llm_gate,
                             token_usage_metrics,
                             say_text_voice_guard,
+                            dash_to_full_stop,
                             tts,
                             transport.output(),
                             assistant_aggregator,

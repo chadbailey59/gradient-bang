@@ -69,7 +69,7 @@ function shellQuote(value: string) {
 }
 
 async function copyCommanderCommandToClipboard(roomUrl: string, token: string) {
-  const command = `uv run bot-v1.py --room-url ${shellQuote(roomUrl)} --token ${shellQuote(token)}`
+  const command = `uv run bot-v2.py --room-url ${shellQuote(roomUrl)} --token ${shellQuote(token)}`
 
   try {
     await navigator.clipboard.writeText(command)
