@@ -46,6 +46,12 @@ BOOTSTRAP_DRAIN_TIMEOUT_SECONDS = max(
 RECONNECT_BACKOFF_MAX = float(os.getenv("PGMQ_RECONNECT_BACKOFF_MAX", "10.0"))
 NO_EVENTS_WARNING_SECONDS = float(os.getenv("PGMQ_NO_EVENTS_WARNING_SECONDS", "30.0"))
 MAX_DISPATCH_ATTEMPTS = int(os.getenv("PGMQ_MAX_DISPATCH_ATTEMPTS", "3"))
+RECEIVE_ALL_EVENTS = os.getenv("EVENT_SESSION_RECEIVE_ALL", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 
 def _resolve_pgmq_url() -> str:
@@ -111,6 +117,7 @@ class PubsubEventAdapter:
         self._first_event_at: Optional[float] = None
         self._catchup_buffer: list[Mapping[str, Any]] = []
         self._pending_scope_sync = False
+        self._receive_all = RECEIVE_ALL_EVENTS
 
     # ------------------------------------------------------------------
     # EventAdapter Protocol
@@ -306,6 +313,13 @@ class PubsubEventAdapter:
         self._session_id = session_id
         self._queue_name = queue_name
         self._pending_scope_sync = False
+        if self._receive_all:
+            await self._set_receive_all(True)
+            logger.warning(
+                "pubsub.receive_all_enabled session_id={} queue={}",
+                self._session_id,
+                self._queue_name,
+            )
 
     async def _assert_session_queue_exists(self, cur: Any, queue_name: str) -> None:
         physical_queue = f"q_{queue_name}"
@@ -375,6 +389,25 @@ class PubsubEventAdapter:
         self._heartbeat_task = asyncio.create_task(
             self._heartbeat_loop(), name="pubsub-session-heartbeat"
         )
+
+    async def _set_receive_all(self, enabled: bool) -> None:
+        if self._session_id is None:
+            return
+        pgmq_url = _resolve_pgmq_url()
+        async with await psycopg.AsyncConnection.connect(
+            pgmq_url, autocommit=True, row_factory=tuple_row
+        ) as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT public.event_session_set_receive_all(
+                        %s::uuid,
+                        %s::text,
+                        %s::boolean
+                    )
+                    """,
+                    (self._session_id, _edge_token(), enabled),
+                )
 
     async def _update_session_scope(self) -> None:
         if self._session_id is None:

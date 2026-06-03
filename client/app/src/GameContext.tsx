@@ -385,7 +385,218 @@ export function GameProvider({ children }: GameProviderProps) {
             return true
           }
 
+          const getRecord = (value: unknown): Record<string, unknown> | undefined =>
+            value && typeof value === "object" ? (value as Record<string, unknown>) : undefined
+
+          const getString = (value: unknown): string | undefined =>
+            typeof value === "string" && value.trim() ? value.trim() : undefined
+
+          const getPayloadShip = (
+            payload: Msg.ServerMessagePayload
+          ): Record<string, unknown> | undefined => getRecord(payload.ship)
+
+          const getPayloadPlayerName = (payload: Msg.ServerMessagePayload): string | undefined => {
+            const player = getRecord(payload.player)
+            return getString(player?.name) ?? getString(payload.actor_character_name)
+          }
+
+          const getPayloadDisplayName = (payload: Msg.ServerMessagePayload): string | undefined => {
+            return (
+              getPayloadPlayerName(payload) ??
+              getString(payload.ship_name) ??
+              getString(getPayloadShip(payload)?.ship_name)
+            )
+          }
+
+          const getObservedEntityKind = (
+            payload: Msg.ServerMessagePayload
+          ): ObservedMapEntity["kind"] => {
+            const player = getRecord(payload.player)
+            const ship = getPayloadShip(payload)
+            if (player?.player_type === "corporation_ship" || ship?.owner_type === "corporation") {
+              return "corp_ship"
+            }
+            if (player?.player_type === "npc") {
+              return "npc"
+            }
+            if (getPayloadShipId(payload)) {
+              return "ship"
+            }
+            return "player"
+          }
+
+          const getExistingEntitySector = (entityId: string): number | undefined =>
+            useGameStore.getState().observed_map_entities[entityId]?.sector
+
+          const getMapCalloutTone = (eventName: string): MapActivityCallout["tone"] => {
+            if (eventName.includes("movement") || eventName === "character.moved") return "movement"
+            if (eventName.startsWith("task.")) return "task"
+            if (eventName === "trade.executed") return "trade"
+            if (eventName.startsWith("combat.") || eventName === "ship.destroyed") return "combat"
+            if (eventName === "error") return "error"
+            return "default"
+          }
+
+          const getMapCalloutText = (
+            eventName: string,
+            payload: Msg.ServerMessagePayload,
+            fallbackName: string
+          ): string | undefined => {
+            const record = payload as Record<string, unknown>
+            if (eventName === "movement.complete") {
+              return undefined
+            }
+            if (eventName === "character.moved") {
+              return undefined
+            }
+            if (eventName === "task.start") {
+              return undefined
+            }
+            if (eventName === "task.finish") {
+              return undefined
+            }
+            if (eventName === "trade.executed") {
+              const trade = getRecord(record.trade)
+              const units = typeof trade?.units === "number" ? trade.units : undefined
+              const commodity = getString(trade?.commodity)
+              const tradeType = getString(trade?.trade_type)
+              if (tradeType && units !== undefined && commodity) {
+                return `${tradeType} ${units} ${commodity}`
+              }
+              return "Trade executed"
+            }
+            if (eventName === "combat.action_accepted") {
+              const action = getString(record.action)
+              return action ? `Combat: ${action}` : "Combat action"
+            }
+            if (eventName === "combat.round_waiting") return "Combat started"
+            if (eventName === "combat.round_resolved") return "Combat round resolved"
+            if (eventName === "combat.ended") return "Combat ended"
+            if (eventName === "ship.destroyed") return "Ship destroyed"
+            if (eventName === "error") return "Error"
+            if (eventName === "status.update") return `${fallbackName} updated`
+            return undefined
+          }
+
+          const upsertObservedEntityFromPayload = (
+            eventName: string,
+            payload: Msg.ServerMessagePayload,
+            options: { sector?: number; callout?: boolean } = {}
+          ) => {
+            const player = getRecord(payload.player)
+            const ship = getPayloadShip(payload)
+            const shipId = getPayloadShipId(payload)
+            const playerId = getString(player?.id)
+            const actorId = getString(payload.actor_character_id)
+            const entityId = shipId ?? playerId ?? actorId
+            if (!entityId) return
+
+            const existing = useGameStore.getState().observed_map_entities[entityId]
+            const playerName = getPayloadPlayerName(payload) ?? existing?.player_name ?? null
+            const name =
+              getPayloadDisplayName(payload) ?? existing?.name ?? playerName ?? entityId.slice(0, 8)
+            const sector =
+              options.sector ?? getPayloadSectorId(payload) ?? getExistingEntitySector(entityId)
+            const timestamp = payload.source?.timestamp ?? new Date().toISOString()
+            const text = getMapCalloutText(eventName, payload, name)
+            const shipName =
+              getString(ship?.ship_name) ??
+              getString(payload.ship_name) ??
+              existing?.ship_name ??
+              name
+            const payloadKind = getObservedEntityKind(payload)
+            const kind =
+              (
+                existing &&
+                payloadKind === "ship" &&
+                player?.player_type === undefined &&
+                ship?.owner_type === undefined
+              ) ?
+                existing.kind
+              : payloadKind
+
+            useGameStore.getState().upsertObservedMapEntity({
+              id: entityId,
+              name,
+              player_id: playerId ?? existing?.player_id ?? actorId ?? null,
+              player_name: playerName,
+              kind,
+              sector,
+              ship_id: shipId,
+              ship_name: shipName,
+              ship_type:
+                getString(ship?.ship_type) ??
+                getString(payload.ship_type) ??
+                existing?.ship_type ??
+                null,
+              last_event_type: eventName,
+              last_event_at: timestamp,
+              last_event_summary: text,
+            })
+
+            if (options.callout !== false && sector !== undefined && text) {
+              useGameStore.getState().addMapActivityCallout({
+                entity_id: entityId,
+                sector,
+                text,
+                tone: getMapCalloutTone(eventName),
+              })
+            }
+          }
+
+          const observeCombatParticipants = (
+            eventName: string,
+            payload: Msg.ServerMessagePayload
+          ) => {
+            const sectorId = getPayloadSectorId(payload)
+            const participants = (payload as { participants?: unknown }).participants
+            if (!Array.isArray(participants) || sectorId === undefined) return
+
+            for (const participant of participants) {
+              const participantRecord = getRecord(participant)
+              if (!participantRecord) continue
+              const ship = getRecord(participantRecord.ship)
+              const participantId =
+                getString(participantRecord.id) ??
+                getString(participantRecord.name) ??
+                getString(ship?.ship_name)
+              if (!participantId) continue
+              const playerName = getString(participantRecord.name) ?? participantId
+              const shipName = getString(ship?.ship_name) ?? playerName
+              useGameStore.getState().upsertObservedMapEntity({
+                id: participantId,
+                name: playerName,
+                player_id: participantId,
+                player_name: playerName,
+                kind:
+                  participantRecord.player_type === "corporation_ship" ? "corp_ship"
+                  : participantRecord.player_type === "npc" ? "npc"
+                  : "player",
+                sector: sectorId,
+                ship_name: shipName,
+                ship_type: getString(ship?.ship_type) ?? null,
+                last_event_type: eventName,
+                last_event_at: payload.source?.timestamp ?? new Date().toISOString(),
+                last_event_summary: getMapCalloutText(eventName, payload, playerName),
+              })
+            }
+          }
+
+          const recordMapObservation = (eventName: string, payload: Msg.ServerMessagePayload) => {
+            observeCombatParticipants(eventName, payload)
+            upsertObservedEntityFromPayload(eventName, payload, {
+              callout:
+                eventName !== "status.snapshot" &&
+                eventName !== "status.update" &&
+                eventName !== "character.moved" &&
+                eventName !== "movement.complete" &&
+                eventName !== "task.start" &&
+                eventName !== "task.finish",
+            })
+          }
+
           // --- EVENT HANDLERS ---
+          recordMapObservation(e.event, e.payload)
 
           switch (e.event) {
             // ----- VERSION

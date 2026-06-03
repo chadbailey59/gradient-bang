@@ -59,7 +59,16 @@ interface MapProps {
   maxDistance?: number
   showLegend?: boolean
   coursePlot?: CoursePlot | null
-  ships?: Array<{ sector: number; ship_name: string; ship_type: string }>
+  ships?: Array<{
+    sector: number
+    ship_name: string
+    ship_type: string
+    player_name?: string | null
+    player_initials?: string
+    player_color?: string
+    kind?: ObservedMapEntity["kind"]
+  }>
+  mapActivityCallouts?: MapActivityCallout[]
   /**
    * Sectors with active combat, drawn as an additive dotted overlay. Toggling
    * this set never alters topology or camera state — it triggers a cheap
@@ -135,6 +144,7 @@ const MapComponent = ({
   maxDistance = 2,
   coursePlot,
   ships,
+  mapActivityCallouts,
   combatSectors,
   onNodeClick,
   onNodeEnter,
@@ -150,17 +160,55 @@ const MapComponent = ({
   const normalizedMapData = useMemo(() => map_data ?? [], [map_data])
 
   // Stabilize ships data - convert flat array to Map<sectorId, shipInfo[]>
-  const shipsKey = ships?.map((s) => `${s.sector}:${s.ship_name}`).join(",") ?? ""
+  const shipsKey =
+    ships
+      ?.map(
+        (s) =>
+          `${s.sector}:${s.player_name ?? ""}:${s.player_initials ?? ""}:${s.player_color ?? ""}:${s.ship_name}:${s.kind ?? ""}`
+      )
+      .join(",") ?? ""
   const shipsMap = useMemo(() => {
     if (!ships || ships.length === 0) return undefined
-    const map = new Map<number, Array<{ ship_name: string; ship_type: string }>>()
+    const map = new Map<
+      number,
+      Array<{
+        ship_name: string
+        ship_type: string
+        player_name?: string | null
+        player_initials?: string
+        player_color?: string
+        kind?: ObservedMapEntity["kind"]
+      }>
+    >()
     for (const ship of ships) {
       const existing = map.get(ship.sector) ?? []
-      existing.push({ ship_name: ship.ship_name, ship_type: ship.ship_type })
+      existing.push({
+        ship_name: ship.ship_name,
+        ship_type: ship.ship_type,
+        player_name: ship.player_name,
+        player_initials: ship.player_initials,
+        player_color: ship.player_color,
+        kind: ship.kind,
+      })
       map.set(ship.sector, existing)
     }
     return map
   }, [ships])
+
+  const mapActivityCalloutsKey =
+    mapActivityCallouts
+      ?.map((callout) => `${callout.id}:${callout.sector}:${callout.text}:${callout.expires_at}`)
+      .join(",") ?? ""
+  const mapActivityCalloutsMap = useMemo(() => {
+    if (!mapActivityCallouts || mapActivityCallouts.length === 0) return undefined
+    const map = new Map<number, MapActivityCallout[]>()
+    for (const callout of mapActivityCallouts) {
+      const existing = map.get(callout.sector) ?? []
+      existing.push(callout)
+      map.set(callout.sector, existing)
+    }
+    return map
+  }, [mapActivityCallouts])
 
   // Sorted serialized key — same pattern as shipsKey. Lets the comparator
   // and the change-detection block diff combat sectors without holding a
@@ -197,6 +245,7 @@ const MapComponent = ({
   const lastConfigRef = useRef<Omit<SectorMapConfigBase, "center_sector_id"> | null>(null)
   const lastCoursePlotRef = useRef<CoursePlot | null | undefined>(coursePlot)
   const lastShipsKeyRef = useRef<string>(shipsKey)
+  const lastMapActivityCalloutsKeyRef = useRef<string>(mapActivityCalloutsKey)
   const lastCombatSectorsKeyRef = useRef<string>(combatSectorsKey)
   const lastCenterWorldRef = useRef<[number, number] | undefined>(center_world)
   const lastFitBoundsWorldRef = useRef<[number, number, number, number] | undefined>(
@@ -392,6 +441,7 @@ const MapComponent = ({
         maxDistance,
         coursePlot,
         ships: shipsMap,
+        mapActivityCallouts: mapActivityCalloutsMap,
         combatSectors,
       })
       controllerRef.current = controller
@@ -402,6 +452,7 @@ const MapComponent = ({
       lastConfigRef.current = baseConfig
       lastCoursePlotRef.current = coursePlot
       lastShipsKeyRef.current = shipsKey
+      lastMapActivityCalloutsKeyRef.current = mapActivityCalloutsKey
       lastCombatSectorsKeyRef.current = combatSectorsKey
       lastCenterWorldRef.current = center_world
       lastFitBoundsWorldRef.current = fit_bounds_world
@@ -422,6 +473,8 @@ const MapComponent = ({
     const configChanged = lastConfigRef.current !== baseConfig
     const coursePlotChanged = !courseplotsEqual(lastCoursePlotRef.current, coursePlot)
     const shipsChanged = lastShipsKeyRef.current !== shipsKey
+    const mapActivityCalloutsChanged =
+      lastMapActivityCalloutsKeyRef.current !== mapActivityCalloutsKey
     const combatSectorsChanged = lastCombatSectorsKeyRef.current !== combatSectorsKey
     const centerWorldChanged = !tuplesEqual(lastCenterWorldRef.current, center_world)
     const fitBoundsWorldChanged = !tuplesEqual(lastFitBoundsWorldRef.current, fit_bounds_world)
@@ -437,6 +490,7 @@ const MapComponent = ({
       !configChanged &&
       !coursePlotChanged &&
       !shipsChanged &&
+      !mapActivityCalloutsChanged &&
       !combatSectorsChanged &&
       !centerWorldChanged &&
       !fitBoundsWorldChanged &&
@@ -469,6 +523,7 @@ const MapComponent = ({
       data: normalizedMapData,
       coursePlot,
       ships: shipsMap,
+      mapActivityCallouts: mapActivityCalloutsMap,
       combatSectors,
     })
 
@@ -504,6 +559,7 @@ const MapComponent = ({
       maxDistanceOnly ||
       needsConfigUpdate ||
       shipsChanged ||
+      mapActivityCalloutsChanged ||
       coursePlotChanged ||
       combatSectorsChanged ||
       topologyChanged
@@ -511,6 +567,7 @@ const MapComponent = ({
       console.debug("%c[SectorMap] Re-render", "color: red; font-weight: bold", {
         configChanged,
         shipsChanged,
+        mapActivityCalloutsChanged,
         coursePlotChanged,
         combatSectorsChanged,
         topologyChanged,
@@ -524,6 +581,7 @@ const MapComponent = ({
     lastConfigRef.current = baseConfig
     lastCoursePlotRef.current = coursePlot
     lastShipsKeyRef.current = shipsKey
+    lastMapActivityCalloutsKeyRef.current = mapActivityCalloutsKey
     lastCombatSectorsKeyRef.current = combatSectorsKey
     lastCenterWorldRef.current = center_world
     lastFitBoundsWorldRef.current = fit_bounds_world
@@ -537,6 +595,8 @@ const MapComponent = ({
     coursePlot,
     shipsKey,
     shipsMap,
+    mapActivityCalloutsKey,
+    mapActivityCalloutsMap,
     combatSectorsKey,
     combatSectors,
     onMapFetch,
@@ -664,8 +724,34 @@ const areMapPropsEqual = (prevProps: MapProps, nextProps: MapProps): boolean => 
 
   // Ships - use serialized key for comparison
   if (prevProps.ships !== nextProps.ships) {
-    const prevKey = prevProps.ships?.map((s) => `${s.sector}:${s.ship_name}`).join(",") ?? ""
-    const nextKey = nextProps.ships?.map((s) => `${s.sector}:${s.ship_name}`).join(",") ?? ""
+    const prevKey =
+      prevProps.ships
+        ?.map(
+          (s) =>
+            `${s.sector}:${s.player_name ?? ""}:${s.player_initials ?? ""}:${s.player_color ?? ""}:${s.ship_name}:${s.kind ?? ""}`
+        )
+        .join(",") ?? ""
+    const nextKey =
+      nextProps.ships
+        ?.map(
+          (s) =>
+            `${s.sector}:${s.player_name ?? ""}:${s.player_initials ?? ""}:${s.player_color ?? ""}:${s.ship_name}:${s.kind ?? ""}`
+        )
+        .join(",") ?? ""
+    if (prevKey !== nextKey) {
+      return false
+    }
+  }
+
+  if (prevProps.mapActivityCallouts !== nextProps.mapActivityCallouts) {
+    const prevKey =
+      prevProps.mapActivityCallouts
+        ?.map((callout) => `${callout.id}:${callout.sector}:${callout.text}:${callout.expires_at}`)
+        .join(",") ?? ""
+    const nextKey =
+      nextProps.mapActivityCallouts
+        ?.map((callout) => `${callout.id}:${callout.sector}:${callout.text}:${callout.expires_at}`)
+        .join(",") ?? ""
     if (prevKey !== nextKey) {
       return false
     }

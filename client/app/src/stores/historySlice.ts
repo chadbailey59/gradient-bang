@@ -7,10 +7,22 @@ import type { EventQueryEntry } from "@/types/messages"
 
 const MAX_MOVEMENT_HISTORY = 200
 const MAX_TRADE_HISTORY = 100
+const MAX_MAP_ACTIVITY_CALLOUTS = 80
 
 export interface HistorySlice {
   activity_log: LogEntry[]
   addActivityLogEntry: (entry: LogEntry) => void
+
+  observed_map_entities: Record<string, ObservedMapEntity>
+  upsertObservedMapEntity: (entity: ObservedMapEntity) => void
+
+  map_activity_callouts: MapActivityCallout[]
+  addMapActivityCallout: (
+    callout: Omit<MapActivityCallout, "id" | "created_at" | "expires_at"> & {
+      ttlMs?: number
+    }
+  ) => void
+  pruneMapActivityCallouts: (now?: number) => void
 
   movement_history: MovementHistory[]
   addMovementHistory: (history: Omit<MovementHistory, "timestamp">) => void
@@ -32,6 +44,8 @@ export interface HistorySlice {
 
 export const createHistorySlice: StateCreator<HistorySlice> = (set) => ({
   activity_log: [],
+  observed_map_entities: {},
+  map_activity_callouts: [],
   known_ports: undefined,
   trade_history: undefined,
   task_history: undefined,
@@ -57,6 +71,42 @@ export const createHistorySlice: StateCreator<HistorySlice> = (set) => ({
             }),
           meta,
         })
+      })
+    ),
+
+  upsertObservedMapEntity: (entity: ObservedMapEntity) =>
+    set(
+      produce((state) => {
+        const existing = state.observed_map_entities[entity.id]
+        state.observed_map_entities[entity.id] = {
+          ...existing,
+          ...entity,
+        }
+      })
+    ),
+
+  addMapActivityCallout: (callout) =>
+    set(
+      produce((state) => {
+        const now = Date.now()
+        state.map_activity_callouts.push({
+          ...callout,
+          id: `${callout.entity_id}:${now}:${Math.random().toString(36).slice(2)}`,
+          created_at: now,
+          expires_at: now + (callout.ttlMs ?? 5000),
+        })
+        state.map_activity_callouts = state.map_activity_callouts
+          .filter((entry: MapActivityCallout) => entry.expires_at > now)
+          .slice(-MAX_MAP_ACTIVITY_CALLOUTS)
+      })
+    ),
+
+  pruneMapActivityCallouts: (now = Date.now()) =>
+    set(
+      produce((state) => {
+        state.map_activity_callouts = state.map_activity_callouts.filter(
+          (entry: MapActivityCallout) => entry.expires_at > now
+        )
       })
     ),
 

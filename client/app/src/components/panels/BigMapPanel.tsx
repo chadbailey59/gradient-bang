@@ -51,6 +51,93 @@ const MAP_CONFIG: MapConfig = {
   },
 }
 
+const PLAYER_COLOR_STORAGE_KEY = "gradient-bang:map-player-colors:v1"
+const PLAYER_COLOR_PALETTE = [
+  { token: "--color-terminal", fallback: "#dcfd38" },
+  { token: "--color-fuel", fallback: "#7dd3fc" },
+  { token: "--color-success", fallback: "#34d399" },
+  { token: "--color-warning", fallback: "#facc15" },
+  { token: "--color-destructive", fallback: "#fb7185" },
+  { token: "--color-terminal-subtle", fallback: "#86914e" },
+  { token: "--color-fuel-subtle", fallback: "#38bdf8" },
+  { token: "--color-success-foreground", fallback: "#bbf7d0" },
+] as const
+
+type PlayerColorToken = (typeof PLAYER_COLOR_PALETTE)[number]["token"]
+
+let playerColorMemory: Record<string, PlayerColorToken> | null = null
+
+function readPlayerColorMemory(): Record<string, PlayerColorToken> {
+  if (playerColorMemory) return playerColorMemory
+  if (typeof window === "undefined") {
+    playerColorMemory = {}
+    return playerColorMemory
+  }
+
+  try {
+    const raw = window.localStorage.getItem(PLAYER_COLOR_STORAGE_KEY)
+    const parsed = raw ? JSON.parse(raw) : {}
+    const validTokens = new Set(PLAYER_COLOR_PALETTE.map((color) => color.token))
+    playerColorMemory = Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, PlayerColorToken] => {
+        const [, value] = entry
+        return typeof value === "string" && validTokens.has(value as PlayerColorToken)
+      })
+    )
+  } catch {
+    playerColorMemory = {}
+  }
+  return playerColorMemory
+}
+
+function writePlayerColorMemory(memory: Record<string, PlayerColorToken>) {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.setItem(PLAYER_COLOR_STORAGE_KEY, JSON.stringify(memory))
+  } catch {
+    // Ignore storage failures; colors will remain stable for this render pass.
+  }
+}
+
+function assignPlayerColorToken(playerKey: string): PlayerColorToken {
+  const memory = readPlayerColorMemory()
+  const existing = memory[playerKey]
+  if (existing) return existing
+
+  const usage = new Map<PlayerColorToken, number>()
+  for (const color of Object.values(memory)) {
+    usage.set(color, (usage.get(color) ?? 0) + 1)
+  }
+  const minUsage = Math.min(...PLAYER_COLOR_PALETTE.map((color) => usage.get(color.token) ?? 0))
+  const candidates = PLAYER_COLOR_PALETTE.filter(
+    (color) => (usage.get(color.token) ?? 0) === minUsage
+  )
+  const selected = candidates[Math.floor(Math.random() * candidates.length)].token
+  memory[playerKey] = selected
+  writePlayerColorMemory(memory)
+  return selected
+}
+
+function resolvePlayerColor(token: PlayerColorToken): string {
+  const paletteColor = PLAYER_COLOR_PALETTE.find((color) => color.token === token)
+  if (typeof window === "undefined") return paletteColor?.fallback ?? "#ffffff"
+  const resolved = getComputedStyle(document.documentElement).getPropertyValue(token).trim()
+  return resolved || paletteColor?.fallback || "#ffffff"
+}
+
+function getPlayerInitials(name: string | null | undefined): string {
+  const trimmed = name?.trim()
+  if (!trimmed) return "?"
+  const letters = trimmed
+    .split(/\s+/)
+    .map((part) => part.match(/[A-Za-z]/)?.[0])
+    .filter((letter): letter is string => Boolean(letter))
+  if (letters.length >= 2) {
+    return `${letters[0]}${letters[1]}`.toUpperCase()
+  }
+  return (letters[0] ?? "?").toUpperCase()
+}
+
 const CommodityRow = ({
   icon,
   label,
@@ -133,6 +220,10 @@ export const BigMapPanel = ({ config }: { config?: MapConfig }) => {
   const mapData = useGameStore.use.regional_map_data?.()
   const coursePlot = useGameStore.use.course_plot?.()
   const ships = useGameStore.use.ships?.()
+  const player = useGameStore.use.player?.()
+  const observedMapEntities = useGameStore.use.observed_map_entities?.()
+  const mapActivityCallouts = useGameStore.use.map_activity_callouts?.()
+  const pruneMapActivityCallouts = useGameStore.use.pruneMapActivityCallouts?.()
   const combatSectorsRecord = useGameStore((state) => state.combat_sectors)
   const mapCenterSector = useGameStore((state) => state.mapCenterSector)
   const mapZoomLevel = useGameStore((state) => state.mapZoomLevel)
@@ -158,13 +249,67 @@ export const BigMapPanel = ({ config }: { config?: MapConfig }) => {
     return { ...base, coursePlotZoomEnabled }
   }, [config, coursePlotZoomEnabled])
 
-  const shipSectors = ships?.data
-    ?.filter((s: ShipSelf) => s.owner_type !== "personal")
-    .map((s: ShipSelf) => ({
-      sector: s.sector ?? 0,
-      ship_name: s.ship_name,
-      ship_type: s.ship_type,
-    }))
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      pruneMapActivityCallouts?.()
+    }, 1000)
+    return () => window.clearInterval(intervalId)
+  }, [pruneMapActivityCallouts])
+
+  const shipSectors = useMemo(() => {
+    const byId = new Map<
+      string,
+      {
+        sector: number
+        ship_name: string
+        ship_type: string
+        player_name?: string | null
+        player_initials?: string
+        player_color?: string
+        kind?: ObservedMapEntity["kind"]
+      }
+    >()
+
+    for (const ship of ships?.data ?? []) {
+      if (typeof ship.sector !== "number") continue
+      const playerName =
+        ship.owner_type === "personal" ?
+          player?.name
+        : (ship.current_task_actor?.character_name ??
+          ship.current_task_actor_name ??
+          ship.byoa?.owner_character_name ??
+          null)
+      const colorKey = ship.owner_type === "personal" ? player?.id || playerName : playerName
+      const colorToken = assignPlayerColorToken(colorKey || ship.ship_id)
+      byId.set(ship.ship_id, {
+        sector: ship.sector,
+        ship_name: ship.ship_name || player?.name || "Unknown ship",
+        ship_type: ship.ship_type || "unknown",
+        player_name: playerName,
+        player_initials: getPlayerInitials(playerName || ship.ship_name),
+        player_color: resolvePlayerColor(colorToken),
+        kind: ship.owner_type === "corporation" ? "corp_ship" : "player",
+      })
+    }
+
+    for (const entity of Object.values(observedMapEntities ?? {})) {
+      if (typeof entity.sector !== "number") continue
+      const id = entity.ship_id ?? entity.id
+      const playerName = entity.player_name ?? entity.name
+      const colorToken = assignPlayerColorToken(entity.player_id || playerName || id)
+      byId.set(id, {
+        sector: entity.sector,
+        ship_name: entity.ship_name || entity.name,
+        ship_type: entity.ship_type || "unknown",
+        player_name: playerName,
+        player_initials: getPlayerInitials(playerName),
+        player_color: resolvePlayerColor(colorToken),
+        kind: entity.kind,
+      })
+    }
+
+    return Array.from(byId.values())
+  }, [observedMapEntities, player?.id, player?.name, ships?.data])
 
   const combatSectorsSet = useMemo(() => {
     const ids = new Set<number>()
@@ -281,6 +426,7 @@ export const BigMapPanel = ({ config }: { config?: MapConfig }) => {
               onMapFetch={handleMapFetch}
               coursePlot={coursePlot ?? null}
               ships={shipSectors}
+              mapActivityCallouts={mapActivityCallouts}
               combatSectors={combatSectorsSet}
               center_world={mapCenterWorld}
               fit_bounds_world={mapFitBoundsWorld}

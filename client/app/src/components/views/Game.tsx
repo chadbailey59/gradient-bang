@@ -1,23 +1,17 @@
 import { useCallback, useEffect, useState } from "react"
 
-import { AnimatePresence, motion } from "motion/react"
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels"
-import { ArrowLeftIcon, WarningDiamondIcon } from "@phosphor-icons/react"
+import { ArrowLeftIcon } from "@phosphor-icons/react"
 
 import { useVoiceCapture } from "@/capture/useVoiceCapture"
-import { ActivityStream } from "@/components/ActivityStream"
-import { ConversationPanel } from "@/components/conversation/ConversationPanel"
 import { GameDialogs } from "@/components/dialogs/GameDialogs"
 import { HighlightOverlay } from "@/components/HighlightOverlay"
 import { BigMapPanel } from "@/components/panels/BigMapPanel"
 import { CombatActionPanel } from "@/components/panels/CombatActionPanel"
 import { CombatDamageVignette } from "@/components/panels/CombatDamageVignette"
-import { MiniMapPanel } from "@/components/panels/MiniMapPanel"
-import { MiniTaskEngines } from "@/components/panels/MiniTaskEngines"
 import { PlayerShipPanel } from "@/components/panels/PlayerShipPanel"
 import { RHSPanelContainer } from "@/components/panels/RHSPanelContainer"
 import { RHSPanelNav } from "@/components/panels/RHSPanelNav"
-import { TaskEnginesPanel } from "@/components/panels/TaskEnginesPanel"
 import { PipecatClientAudio } from "@/components/PipecatClientAudio"
 import { Button, Divider } from "@/components/primitives"
 import { QuestAcceptedOverlay } from "@/components/QuestAcceptedOverlay"
@@ -29,7 +23,6 @@ import { ToastContainer } from "@/components/toasts/ToastContainer"
 import { TopBar } from "@/components/TopBar"
 import { TutorialOverlay } from "@/components/TutorialOverlay"
 import { TutorialRevealOverlay } from "@/components/TutorialRevealOverlay"
-import { UIModeToggle } from "@/components/UIModeToggle"
 import { useNotificationSound } from "@/hooks/useNotificationSound"
 import { usePlayerRank } from "@/hooks/usePlayerRank"
 import useAudioStore from "@/stores/audio"
@@ -41,7 +34,6 @@ const enabledCx = "pointer-events-auto opacity-100"
 
 export const Game = () => {
   const uiState = useGameStore.use.uiState()
-  const uiMode = useGameStore.use.uiMode()
   const tutorialActive = useGameStore((state) => state.tutorialActive)
   const tutorialRevealed = useGameStore((state) => state.tutorialRevealed)
   const tutorialResetFlash = useGameStore((state) => state.tutorialResetFlash)
@@ -125,90 +117,12 @@ export const Game = () => {
                 : undefined
               }
             >
-              <div className="absolute left-0 bottom-0 h-60 w-full pointer-events-none z-20">
-                <ActivityStream />
-              </div>
               <TutorialRevealOverlay id="main" />
 
               {uiState === "combat" ?
                 <CombatActionPanel />
-              : <>
-                  <AnimatePresence mode="wait">
-                    {uiMode === "tasks" ?
-                      <motion.div
-                        key="task-engines"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="h-full flex-1"
-                      >
-                        <TaskEnginesPanel />
-                      </motion.div>
-                    : <motion.div
-                        key="mini-task-engines"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="h-full flex-1"
-                      >
-                        <BigMapPanel />
-                      </motion.div>
-                    }
-                  </AnimatePresence>
-                </>
-              }
+              : <BigMapPanel />}
             </div>
-            <footer className="p-ui-xs py-0 mb-ui-xs h-ui-bottom grid grid-cols-[1fr_auto_auto]">
-              <ConversationPanel className="min-w-0 max-w-2xl mr-ui-xs" />
-              <UIModeToggle />
-              <div
-                className="relative w-ui-minimap h-ui-bottom bracket-left bracket-offset-0 bracket-1 bracket-input overflow-hidden"
-                data-tutorial={
-                  tutorialActive ?
-                    tutorialRevealed.includes("main") ?
-                      "revealing"
-                    : "hidden"
-                  : undefined
-                }
-              >
-                <motion.div
-                  className="absolute inset-0 h-full w-ui-minimap"
-                  animate={uiMode === "tasks" ? { opacity: 1, y: 0 } : { opacity: 0, y: -100 }}
-                  initial={false}
-                  style={{
-                    pointerEvents: uiMode === "tasks" ? "auto" : "none",
-                    contentVisibility: uiMode === "tasks" ? "visible" : "hidden",
-                  }}
-                  {...(uiMode !== "tasks" ? { inert: true } : {})}
-                >
-                  <MiniMapPanel className="w-ui-minimap" paused={uiMode !== "tasks"} />
-                </motion.div>
-                <motion.div
-                  className="absolute inset-0 h-full w-ui-minimap"
-                  animate={uiMode !== "tasks" ? { opacity: 1, y: 0 } : { opacity: 0, y: 100 }}
-                  initial={false}
-                  style={{
-                    pointerEvents: uiMode !== "tasks" ? "auto" : "none",
-                    contentVisibility: uiMode !== "tasks" ? "visible" : "hidden",
-                  }}
-                  {...(uiMode === "tasks" ? { inert: true } : {})}
-                >
-                  <MiniTaskEngines />
-                </motion.div>
-                {uiState === "combat" && (
-                  <div className="animate-in fade-in-0 duration-1000 absolute inset-px z-2 bg-background/60 cross-lines-subtle text-destructive-foreground flex flex-col items-center justify-center">
-                    <div className="relative z-10 bg-destructive-background/70 text-center px-ui-sm py-ui-xs">
-                      <WarningDiamondIcon
-                        size={32}
-                        className="text-destructive mx-auto mb-1"
-                        weight="duotone"
-                      />
-                      <span className="text-xs uppercase font-bold mx-auto">Combat engaged</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </footer>
           </main>
         </Panel>
         <Separator className="w-px bg-border outline-white data-[separator=active]:bg-white data-[separator=active]:outline-1 data-[separator=hover]:bg-subtle z-90" />

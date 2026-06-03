@@ -326,7 +326,6 @@ async def run_task(args: argparse.Namespace) -> int:
                 task_agent = NPCTaskAgent(
                     "npc_task",
                     bus=self._bus,
-                    game_client=game_client,
                     character_id=target_character_id,
                     is_corp_ship=bool(args.ship_id),
                 )
@@ -335,6 +334,7 @@ async def run_task(args: argparse.Namespace) -> int:
                     payload["context"] = args.instructions
                 self._pending_payload = payload
                 await self.add_agent(task_agent)
+                await self.watch_agent("npc_task")
 
             async def _forward_event(self, event):
                 await self.send_message(

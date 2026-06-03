@@ -297,6 +297,31 @@ declare global {
     last_visited?: string
   }
 
+  interface ObservedMapEntity {
+    id: string
+    name: string
+    player_id?: string | null
+    player_name?: string | null
+    kind: "player" | "corp_ship" | "npc" | "ship"
+    sector?: number
+    ship_id?: string
+    ship_name?: string | null
+    ship_type?: string | null
+    last_event_type?: string
+    last_event_at?: string
+    last_event_summary?: string
+  }
+
+  interface MapActivityCallout {
+    id: string
+    entity_id: string
+    sector: number
+    text: string
+    tone: "default" | "movement" | "task" | "trade" | "combat" | "error"
+    created_at: number
+    expires_at: number
+  }
+
   // --- UI
 
   type UIState = "idle" | "moving" | "combat" | "paused"
